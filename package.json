@@ -1,6 +1,6 @@
 {
   "name": "dsh-reverse-skill",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "DSH plugin that bundles the upstream reverse-skill corpus (88 skills) as a skill provider and tracks upstream commits.",
   "type": "module",
   "main": "lib/index.js",
