@@ -11,11 +11,23 @@ vendors upstream verbatim and re-syncs from it automatically.
 ## Install
 
 ```bash
-# from a local checkout
-dsh plugin --profile <profile> add /absolute/path/to/dsh-reverse-skill
+# from a local checkout (link: keeps the checkout live — edits and upstream
+# syncs take effect without repacking or reinstalling)
+dsh plugin --profile <profile> add link:/absolute/path/to/dsh-reverse-skill
+
+# from a packed tarball
+pnpm pack
+dsh plugin --profile <profile> add /absolute/path/to/dsh-reverse-skill-<version>.tgz
 
 # or from git
 dsh plugin --profile <profile> add github:iuuuuuuuu/dsh-reverse-skill
+```
+
+A `link:` install points the profile at your working tree, so it needs the
+package's own dependencies installed once:
+
+```bash
+pnpm install
 ```
 
 Then verify the wiring:
