@@ -11,32 +11,51 @@ vendors upstream verbatim and re-syncs from it automatically.
 ## Install
 
 ```bash
-# from a local checkout (link: keeps the checkout live — edits and upstream
-# syncs take effect without repacking or reinstalling)
-dsh plugin --profile <profile> add link:/absolute/path/to/dsh-reverse-skill
-
-# from a packed tarball
-pnpm pack
-dsh plugin --profile <profile> add /absolute/path/to/dsh-reverse-skill-<version>.tgz
-
-# or from git
 dsh plugin --profile <profile> add github:iuuuuuuuu/dsh-reverse-skill
 ```
 
-A `link:` install points the profile at your working tree, so it needs the
-package's own dependencies installed once:
+pnpm resolves the spec to a codeload tarball pinned at a commit, and DSH
+registers the plugin because `package.json` declares `dsh.bundle.patch`. No
+`pnpm install` is needed first — the repository install pulls its own
+dependencies.
 
-```bash
-pnpm install
-```
-
-Then verify the wiring:
+Verify the wiring:
 
 ```bash
 dsh --profile <profile> --dump-config
 ```
 
 The inserted entry is `reverse-skill-upstream` pointing at `dsh-reverse-skill`.
+
+### Updating
+
+The install is pinned to a commit, so it only moves when you ask:
+
+```bash
+dsh plugin --profile <profile> update dsh-reverse-skill
+```
+
+That re-resolves the spec against the repository's default branch and rewrites
+the lockfile pin. Restart DSH afterwards so the new corpus is scanned.
+
+Two things have to happen before an update carries new skills:
+
+1. The nightly workflow merged its `chore: sync upstream reverse-skill @<commit>`
+   pull request, so the repository actually contains the newer corpus.
+2. You ran the update command above.
+
+### Other install styles
+
+```bash
+# from a local checkout — link: keeps the tree live, so repository edits and
+# upstream syncs take effect without repacking or reinstalling
+dsh plugin --profile <profile> add link:/absolute/path/to/dsh-reverse-skill
+pnpm install   # a link: install needs the checkout's own dependencies
+
+# from a packed tarball
+pnpm pack
+dsh plugin --profile <profile> add /absolute/path/to/dsh-reverse-skill-<version>.tgz
+```
 
 ### Replacing the old plugin
 
