@@ -13,14 +13,15 @@
  *   node tools/sync-upstream.mjs --no-bump       # do not bump the patch version
  *   node tools/sync-upstream.mjs --upstream DIR  # use a local clone instead
  */
-import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync,
   rmSync, statSync, writeFileSync
 } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { digestObjects, isGitCheckout } from './git-objects.mjs';
 
 const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DEFAULT_REPO = 'https://github.com/zhaoxuya520/reverse-skill.git';
@@ -103,20 +104,23 @@ const GITATTRIBUTES_ADDITIONS = [
 ].join(String.fromCharCode(10));
 
 /**
- * The vendored .gitattributes drives line endings for the whole repository, so
- * upstream rules are kept verbatim and this package's own rules are appended
- * after a marker. Re-running sync therefore stays idempotent.
+ * The exact .gitattributes this package stores.
+ *
+ * The vendored file drives line endings for the whole repository, so upstream
+ * rules are kept verbatim and this package's own rules are appended after a
+ * marker. Deriving it from the upstream source rather than from the copy in
+ * this package keeps the result identical on every run, which is what makes
+ * the recorded digest meaningful.
  */
-function mergeGitattributes() {
-  const file = join(PACKAGE_ROOT, '.gitattributes');
-  if (!existsSync(file)) return;
-  const raw = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+function mergedGitattributes(upstreamRoot) {
+  const source = join(upstreamRoot, '.gitattributes');
+  if (!existsSync(source)) return undefined;
+  const raw = readFileSync(source, 'utf8').replace(/\r\n/g, '\n');
   const index = raw.indexOf(GITATTRIBUTES_MARKER);
   const base = (index === -1 ? raw : raw.slice(0, index)).replace(/\s*$/, '');
-  writeFileSync(file, base + GITATTRIBUTES_ADDITIONS);
+  return base + GITATTRIBUTES_ADDITIONS;
 }
 const toPosix = (value) => value.split(sep).join('/');
-const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 
 /** Whether an upstream-relative posix path is vendored. */
@@ -223,6 +227,38 @@ function applyExecutableModes(executable, previouslyExecutable) {
   apply(cleared, 0o644, '-x');
 }
 
+/**
+ * Digest each vendored file exactly as git stores it.
+ *
+ * Hashing the working tree would make the manifest platform dependent, because
+ * a checkout with core.autocrlf rewrites line endings on disk. A Linux runner
+ * would then compute different digests for the same upstream commit and open a
+ * pull request on every run. Object bytes are identical everywhere, and a real
+ * upstream edit still changes them. Sources that are not git checkouts fall
+ * back to the working tree.
+ */
+function digestVendored(upstreamRoot, plan) {
+  const digests = {};
+  if (!isGitCheckout(upstreamRoot)) {
+    for (const [destination, source] of plan) {
+      digests[destination] = createHash('sha256').update(readFileSync(source)).digest('hex');
+    }
+  } else {
+    const specs = [];
+    for (const [destination, source] of plan) specs.push([destination, 'HEAD:' + toPosix(relative(upstreamRoot, source))]);
+    const byDigest = digestObjects(upstreamRoot, specs.map(([, spec]) => spec));
+    for (const [destination, spec] of specs) digests[destination] = byDigest.get(spec);
+  }
+  // .gitattributes is the one vendored file this package rewrites, so the
+  // manifest records the digest of the merged result instead. An upstream edit
+  // to the base still changes that digest, so drift is still detected.
+  const merged = mergedGitattributes(upstreamRoot);
+  if (merged !== undefined && digests['.gitattributes'] !== undefined) {
+    digests['.gitattributes'] = createHash('sha256').update(merged).digest('hex');
+  }
+  return digests;
+}
+
 const argv = process.argv.slice(2);
 const check = argv.includes('--check');
 const bump = !argv.includes('--no-bump');
@@ -239,11 +275,11 @@ const upstreamVersion = existsSync(join(upstreamRoot, 'VERSION'))
   : 'unknown';
 
 const plan = planMirror(upstreamRoot);
-const next = {};
-for (const [destination, source] of plan) next[destination] = sha256(source);
+const next = digestVendored(upstreamRoot, plan);
 const nextExecutable = executablePaths(upstreamRoot, new Set(plan.keys()));
 
 const previousManifest = existsSync(MANIFEST_FILE) ? readJson(MANIFEST_FILE) : { files: {} };
+const previousUpstream = existsSync(UPSTREAM_FILE) ? readJson(UPSTREAM_FILE) : {};
 const previous = previousManifest.files || {};
 const previousExecutable = previousManifest.executable || [];
 
@@ -257,6 +293,8 @@ const modeChanged = [
   ...nextExecutable.filter((key) => !previousExecutable.includes(key)),
   ...previousExecutable.filter((key) => !executableSet.has(key))
 ].sort();
+
+const contentChanged = added.length + removed.length + changed.length + modeChanged.length > 0;
 
 const summary = {
   upstream: repo,
@@ -287,23 +325,31 @@ if (check) {
   }
   for (const key of removed) rmSync(join(PACKAGE_ROOT, key), { force: true });
   applyExecutableModes(nextExecutable, previousExecutable);
-  mergeGitattributes();
+  const merged = mergedGitattributes(upstreamRoot);
+  if (merged !== undefined) writeFileSync(join(PACKAGE_ROOT, '.gitattributes'), merged);
 
-  writeFileSync(MANIFEST_FILE, JSON.stringify({ upstream: repo, commit, commitDate, executable: nextExecutable, files: next }, null, 2) + String.fromCharCode(10));
+  // Sorted keys keep the manifest byte-identical across platforms: readdir
+  // order differs between NTFS and ext4, and an unsorted map would show up as
+  // a spurious diff on every CI run.
+  const sortedFiles = {};
+  for (const key of Object.keys(next).sort()) sortedFiles[key] = next[key];
+
+  writeFileSync(MANIFEST_FILE, JSON.stringify({ upstream: repo, commit, commitDate, executable: nextExecutable, files: sortedFiles }, null, 2) + String.fromCharCode(10));
   writeFileSync(UPSTREAM_FILE, JSON.stringify({
     repository: repo,
     branch,
     commit,
     commitDate,
     upstreamVersion,
-    syncedAt: new Date().toISOString(),
+    // Only a real change advances the timestamp, otherwise every run would
+    // rewrite this file and the nightly job would open an empty pull request.
+    syncedAt: contentChanged || !previousUpstream.syncedAt ? new Date().toISOString() : previousUpstream.syncedAt,
     vendoredFiles: Object.keys(next).length,
     excluded: [...EXCLUDED_PATHS].sort()
   }, null, 2) + String.fromCharCode(10));
 
   const manifestPath = join(PACKAGE_ROOT, 'package.json');
   const pkg = readJson(manifestPath);
-  const contentChanged = added.length + removed.length + changed.length > 0;
   if (bump && contentChanged) {
     const parts = pkg.version.split('.').map((part) => Number.parseInt(part, 10));
     pkg.version = parts[0] + '.' + parts[1] + '.' + (parts[2] + 1);

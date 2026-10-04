@@ -8,6 +8,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
+import { digestObjects, indexedEntries } from './git-objects.mjs';
 
 const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SKILL_ROOTS = ['skills', 'CTF-Sandbox-Orchestrator'];
@@ -119,23 +120,41 @@ else {
   if (upstream.vendoredFiles !== Object.keys(manifest.files || {}).length) {
     fail('upstream.json vendoredFiles does not match tools/upstream-files.json');
   }
+  // The manifest records what upstream committed, so the tracked blobs must
+  // reproduce those digests exactly. Comparing stored objects rather than
+  // working-tree files keeps this meaningful on a checkout whose line endings
+  // were rewritten, and it catches a stale manifest as well as lost edits.
+  const recorded = manifest.files || {};
+  let index;
+  try {
+    index = indexedEntries(PACKAGE_ROOT);
+  } catch {
+    warn('could not read the git index; skipping vendored content check');
+  }
+  if (index !== undefined) {
+    const specs = [];
+    for (const key of Object.keys(recorded).sort()) {
+      const entry = index.get(key);
+      if (entry === undefined) fail('vendored file is recorded but not tracked: ' + key);
+      else specs.push([key, entry.sha]);
+    }
+    try {
+      const digests = digestObjects(PACKAGE_ROOT, specs.map(([, sha]) => sha));
+      const drifted = specs.filter(([key, sha]) => digests.get(sha) !== recorded[key]).map(([key]) => key);
+      if (drifted.length > 0) {
+        fail('vendored content does not match tools/upstream-files.json: ' + drifted.slice(0, 10).join(', '));
+      }
+    } catch (error) {
+      warn('could not read tracked blobs; skipping vendored content check: ' + error.message);
+    }
+  }
+
   // Git records an executable bit in the tree that some filesystems cannot
   // represent, so a Windows checkout silently loses it. Compare the index
   // against the manifest to catch a mode-only drift the content digests miss.
   const executable = manifest.executable || [];
-  if (executable.length > 0) {
-    let listed = [];
-    try {
-      listed = execFileSync('git', ['ls-files', '-s'], { cwd: PACKAGE_ROOT, encoding: 'utf8' }).split(String.fromCharCode(10));
-    } catch {
-      warn('could not read git index; skipping executable-bit check');
-    }
-    const modes = new Map();
-    for (const entry of listed) {
-      const match = /^(\d{6}) [0-9a-f]+ \d+\t(.*)$/.exec(entry);
-      if (match) modes.set(match[2], match[1]);
-    }
-    const missing = executable.filter((key) => modes.has(key) && modes.get(key) !== '100755');
+  if (executable.length > 0 && index !== undefined) {
+    const missing = executable.filter((key) => index.has(key) && index.get(key).mode !== '100755');
     if (missing.length > 0) {
       fail('vendored files should be executable but are recorded as 100644: ' + missing.slice(0, 10).join(', '));
     }
