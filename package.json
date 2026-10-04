@@ -1,0 +1,90 @@
+{
+  "name": "dsh-reverse-skill",
+  "version": "1.0.2",
+  "description": "DSH plugin that bundles the upstream reverse-skill corpus (88 skills) as a skill provider and tracks upstream commits.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "tools",
+    "skills",
+    "CTF-Sandbox-Orchestrator",
+    "docs",
+    "examples",
+    "kali",
+    "scripts",
+    "burp-mcp-full",
+    "reports",
+    "cordis.patch.yml",
+    "upstream.json",
+    "RULES.md",
+    "RULES_zh.md",
+    "SECURITY.md",
+    "CHANGELOG.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "VERSION",
+    "UPSTREAM-LICENSE",
+    "UPSTREAM-README.md",
+    "UPSTREAM-README_zh.md",
+    "UPSTREAM-README_AI.md",
+    "UPSTREAM-README-kali.md",
+    "reverse-skill.png",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "dsh-reverse-skill contributors"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iuuuuuuuu/dsh-reverse-skill.git"
+  },
+  "homepage": "https://github.com/iuuuuuuuu/dsh-reverse-skill#readme",
+  "bugs": {
+    "url": "https://github.com/iuuuuuuuu/dsh-reverse-skill/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "skill",
+    "reverse-engineering",
+    "ctf",
+    "security"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "yaml": "^2.4.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.4"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "sync": "node tools/sync-upstream.mjs",
+    "sync:check": "node tools/sync-upstream.mjs --check",
+    "verify": "node tools/verify.mjs",
+    "test": "node tools/verify.mjs && node tools/test-provider.mjs"
+  },
+  "upstreamCommit": "cab634bd855fc287f6e420c1f36fd1a6b9245960"
+}

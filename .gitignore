@@ -1,0 +1,15 @@
+node_modules/
+.sync-cache/
+
+# Machine-specific upstream artifacts (gitignored upstream as well).
+skills/tool-index.md
+skills/tool-index.json
+work/
+mcps/
+implementation-notes.md
+BOOTSTRAP.md
+*.keystore
+*-scope-*/
+
+# Local test profiles.
+.test-profile/

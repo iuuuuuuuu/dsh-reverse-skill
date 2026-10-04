@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/zhaoxuya520/reverse-skill.git",
+  "branch": "main",
+  "commit": "cab634bd855fc287f6e420c1f36fd1a6b9245960",
+  "commitDate": "2026-09-22T05:18:45Z",
+  "upstreamVersion": "1.0.1",
+  "syncedAt": "2026-10-04T07:03:07.683Z",
+  "vendoredFiles": 592,
+  "excluded": [
+    ".git",
+    ".github",
+    "BOOTSTRAP.md",
+    "LOCAL-READINESS.md",
+    "implementation-notes.md",
+    "mcps",
+    "node_modules",
+    "plugins",
+    "skills/tool-index.json",
+    "skills/tool-index.md",
+    "work"
+  ]
+}

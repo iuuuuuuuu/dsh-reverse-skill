@@ -1,0 +1,7 @@
+# DSH bundle patch for dsh-reverse-skill.
+#
+# Inserts the plugin into the profile's plugin tree. The `name` below is the
+# published package name, so it is resolved from the profile's node_modules.
+- insert:
+    - id: reverse-skill-upstream
+      name: "dsh-reverse-skill"
