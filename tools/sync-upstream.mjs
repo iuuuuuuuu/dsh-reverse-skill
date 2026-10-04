@@ -84,6 +84,37 @@ const EXCLUDED_PATHS = new Set([
   'skills/tool-index.json'
 ]);
 
+/** Marker separating upstream line-ending rules from this package's additions. */
+const GITATTRIBUTES_MARKER = '# --- dsh-reverse-skill additions';
+
+/** Extra line-ending rules this package needs on top of the upstream ones. */
+const GITATTRIBUTES_ADDITIONS = [
+  '',
+  '',
+  GITATTRIBUTES_MARKER + ' (kept across upstream syncs) ---',
+  '*.mjs text eol=lf',
+  '*.cjs text eol=lf',
+  '*.ts text eol=lf',
+  '.gitignore text eol=lf',
+  'LICENSE text eol=lf',
+  'UPSTREAM-LICENSE text eol=lf',
+  'VERSION text eol=lf',
+  ''
+].join(String.fromCharCode(10));
+
+/**
+ * The vendored .gitattributes drives line endings for the whole repository, so
+ * upstream rules are kept verbatim and this package's own rules are appended
+ * after a marker. Re-running sync therefore stays idempotent.
+ */
+function mergeGitattributes() {
+  const file = join(PACKAGE_ROOT, '.gitattributes');
+  if (!existsSync(file)) return;
+  const raw = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+  const index = raw.indexOf(GITATTRIBUTES_MARKER);
+  const base = (index === -1 ? raw : raw.slice(0, index)).replace(/\s*$/, '');
+  writeFileSync(file, base + GITATTRIBUTES_ADDITIONS);
+}
 const toPosix = (value) => value.split(sep).join('/');
 const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
@@ -208,6 +239,7 @@ if (check) {
     copyFileSync(source, target);
   }
   for (const key of removed) rmSync(join(PACKAGE_ROOT, key), { force: true });
+  mergeGitattributes();
 
   writeFileSync(MANIFEST_FILE, JSON.stringify({ upstream: repo, commit, commitDate, files: next }, null, 2) + String.fromCharCode(10));
   writeFileSync(UPSTREAM_FILE, JSON.stringify({

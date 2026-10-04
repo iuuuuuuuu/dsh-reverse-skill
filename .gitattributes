@@ -16,3 +16,12 @@
 *.zip binary
 *.png binary
 *.keystore binary
+
+# --- dsh-reverse-skill additions (kept across upstream syncs) ---
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.ts text eol=lf
+.gitignore text eol=lf
+LICENSE text eol=lf
+UPSTREAM-LICENSE text eol=lf
+VERSION text eol=lf
