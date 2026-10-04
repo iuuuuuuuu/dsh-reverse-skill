@@ -16,7 +16,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
-  copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync,
+  chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync,
   rmSync, statSync, writeFileSync
 } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -186,6 +186,43 @@ function gitOutput(directory, args) {
   return execFileSync('git', args, { cwd: directory, encoding: 'utf8' }).trim();
 }
 
+/**
+ * Upstream paths recorded with the executable bit, restricted to vendored ones.
+ *
+ * Git stores that bit in the tree, but not every filesystem can represent it, so
+ * the mode is tracked explicitly rather than inferred from a working copy.
+ */
+function executablePaths(upstreamRoot, vendored) {
+  const raw = execFileSync('git', ['ls-files', '-s', '-z'], { cwd: upstreamRoot, encoding: 'utf8' });
+  const found = [];
+  for (const entry of raw.split(String.fromCharCode(0))) {
+    const match = /^(\d{6}) [0-9a-f]+ \d+\t(.*)$/.exec(entry);
+    if (!match || match[1] !== '100755') continue;
+    if (vendored.has(match[2])) found.push(match[2]);
+  }
+  return found.sort();
+}
+
+/**
+ * Apply the upstream executable bit to the working tree and, for paths already
+ * tracked, to the index. A Windows checkout cannot record the bit on its own,
+ * which would otherwise show up as a mode-only diff on every sync.
+ */
+function applyExecutableModes(executable, previouslyExecutable) {
+  const apply = (paths, mode, flag) => {
+    for (const key of paths) {
+      if (!existsSync(join(PACKAGE_ROOT, key))) continue;
+      try { chmodSync(join(PACKAGE_ROOT, key), mode); } catch { /* not representable */ }
+      try {
+        execFileSync('git', ['update-index', '--chmod=' + flag, '--', key], { cwd: PACKAGE_ROOT, stdio: 'ignore' });
+      } catch { /* untracked or not a worktree */ }
+    }
+  };
+  apply(executable, 0o755, '+x');
+  const cleared = previouslyExecutable.filter((key) => !executable.includes(key));
+  apply(cleared, 0o644, '-x');
+}
+
 const argv = process.argv.slice(2);
 const check = argv.includes('--check');
 const bump = !argv.includes('--no-bump');
@@ -204,15 +241,22 @@ const upstreamVersion = existsSync(join(upstreamRoot, 'VERSION'))
 const plan = planMirror(upstreamRoot);
 const next = {};
 for (const [destination, source] of plan) next[destination] = sha256(source);
+const nextExecutable = executablePaths(upstreamRoot, new Set(plan.keys()));
 
 const previousManifest = existsSync(MANIFEST_FILE) ? readJson(MANIFEST_FILE) : { files: {} };
 const previous = previousManifest.files || {};
+const previousExecutable = previousManifest.executable || [];
 
 const added = Object.keys(next).filter((key) => previous[key] === undefined).sort();
 const removed = Object.keys(previous).filter((key) => next[key] === undefined).sort();
 const changed = Object.keys(next)
   .filter((key) => previous[key] !== undefined && previous[key] !== next[key])
   .sort();
+const executableSet = new Set(nextExecutable);
+const modeChanged = [
+  ...nextExecutable.filter((key) => !previousExecutable.includes(key)),
+  ...previousExecutable.filter((key) => !executableSet.has(key))
+].sort();
 
 const summary = {
   upstream: repo,
@@ -220,16 +264,19 @@ const summary = {
   commitDate,
   upstreamVersion,
   vendoredFiles: Object.keys(next).length,
+  executable: nextExecutable.length,
   added: added.length,
   removed: removed.length,
   changed: changed.length,
+  modeChanged: modeChanged.length,
   sampleAdded: added.slice(0, 10),
   sampleRemoved: removed.slice(0, 10),
-  sampleChanged: changed.slice(0, 10)
+  sampleChanged: changed.slice(0, 10),
+  sampleModeChanged: modeChanged.slice(0, 10)
 };
 
 if (check) {
-  const upToDate = added.length === 0 && removed.length === 0 && changed.length === 0;
+  const upToDate = added.length === 0 && removed.length === 0 && changed.length === 0 && modeChanged.length === 0;
   console.log(JSON.stringify({ ...summary, upToDate }, null, 2));
   process.exitCode = upToDate ? 0 : 1;
 } else {
@@ -239,9 +286,10 @@ if (check) {
     copyFileSync(source, target);
   }
   for (const key of removed) rmSync(join(PACKAGE_ROOT, key), { force: true });
+  applyExecutableModes(nextExecutable, previousExecutable);
   mergeGitattributes();
 
-  writeFileSync(MANIFEST_FILE, JSON.stringify({ upstream: repo, commit, commitDate, files: next }, null, 2) + String.fromCharCode(10));
+  writeFileSync(MANIFEST_FILE, JSON.stringify({ upstream: repo, commit, commitDate, executable: nextExecutable, files: next }, null, 2) + String.fromCharCode(10));
   writeFileSync(UPSTREAM_FILE, JSON.stringify({
     repository: repo,
     branch,

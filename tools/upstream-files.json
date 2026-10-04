@@ -2,6 +2,13 @@
   "upstream": "https://github.com/zhaoxuya520/reverse-skill.git",
   "commit": "cab634bd855fc287f6e420c1f36fd1a6b9245960",
   "commitDate": "2026-09-22T05:18:45Z",
+  "executable": [
+    "kali/scripts/test-pwntools-discovery.sh",
+    "skills/scripts/case-guard.sh",
+    "skills/scripts/case-init.sh",
+    "skills/scripts/master-route.sh",
+    "skills/scripts/test-bash-workflow.sh"
+  ],
   "files": {
     ".gitattributes": "de926fb1f43e6fdb3da2be870997d311e00d90ac70b325d4b730d0127e050b27",
     "RULES.md": "83132f6a77ac86949b4927c7794c3439a0c1fc325be9f40a68ef85c6da427918",

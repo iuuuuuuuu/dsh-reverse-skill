@@ -3,6 +3,7 @@
  * Structural verification of the vendored corpus and the plugin manifest.
  * Hard failures exit non-zero; advisory findings print as warnings.
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -117,6 +118,27 @@ else {
   if (pkg.upstreamCommit !== upstream.commit) fail('package.json upstreamCommit does not match upstream.json');
   if (upstream.vendoredFiles !== Object.keys(manifest.files || {}).length) {
     fail('upstream.json vendoredFiles does not match tools/upstream-files.json');
+  }
+  // Git records an executable bit in the tree that some filesystems cannot
+  // represent, so a Windows checkout silently loses it. Compare the index
+  // against the manifest to catch a mode-only drift the content digests miss.
+  const executable = manifest.executable || [];
+  if (executable.length > 0) {
+    let listed = [];
+    try {
+      listed = execFileSync('git', ['ls-files', '-s'], { cwd: PACKAGE_ROOT, encoding: 'utf8' }).split(String.fromCharCode(10));
+    } catch {
+      warn('could not read git index; skipping executable-bit check');
+    }
+    const modes = new Map();
+    for (const entry of listed) {
+      const match = /^(\d{6}) [0-9a-f]+ \d+\t(.*)$/.exec(entry);
+      if (match) modes.set(match[2], match[1]);
+    }
+    const missing = executable.filter((key) => modes.has(key) && modes.get(key) !== '100755');
+    if (missing.length > 0) {
+      fail('vendored files should be executable but are recorded as 100644: ' + missing.slice(0, 10).join(', '));
+    }
   }
 }
 
