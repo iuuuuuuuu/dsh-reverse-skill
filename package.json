@@ -38,7 +38,8 @@
     "UPSTREAM-README_AI.md",
     "UPSTREAM-README-kali.md",
     "reverse-skill.png",
-    "LICENSE"
+    "LICENSE",
+    "README.en.md"
   ],
   "license": "MIT",
   "author": {

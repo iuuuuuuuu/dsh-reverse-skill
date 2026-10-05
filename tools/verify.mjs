@@ -90,6 +90,23 @@ for (const key of Object.keys(pkg.peerDependencies || {})) {
   }
 }
 
+// The Chinese README is the default document and the English one is its
+// translation; both must stay cross-linked and both must ship in the package,
+// otherwise the default README links to a file that is not published.
+const readmeFile = join(PACKAGE_ROOT, 'README.md');
+const readmeEnFile = join(PACKAGE_ROOT, 'README.en.md');
+if (!existsSync(readmeFile)) fail('README.md is missing');
+if (!existsSync(readmeEnFile)) fail('README.en.md is missing');
+if ((pkg.files || []).indexOf('README.en.md') === -1) {
+  fail('package.json files[] must publish README.en.md, because README.md links to it');
+}
+if (existsSync(readmeFile) && existsSync(readmeEnFile)) {
+  const readme = readFileSync(readmeFile, 'utf8');
+  const readmeEn = readFileSync(readmeEnFile, 'utf8');
+  if (readme.indexOf('./README.en.md') === -1) fail('README.md must link to ./README.en.md');
+  if (readmeEn.indexOf('./README.md') === -1) fail('README.en.md must link back to ./README.md');
+  if (readme.indexOf('安装') === -1) fail('README.md is the default document and must be written in Chinese');
+}
 const patchFile = join(PACKAGE_ROOT, 'cordis.patch.yml');
 if (!existsSync(patchFile)) fail('cordis.patch.yml is missing');
 else {
