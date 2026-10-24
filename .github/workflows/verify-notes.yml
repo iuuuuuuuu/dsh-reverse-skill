@@ -1,0 +1,88 @@
+# 决策笔记门禁：目录/分类/文件名、头部与必备节、归档封印。
+#
+# **为什么用 paths 过滤**：本仓库刚建笔记树、还没有任何笔记，而三个 verify 脚本
+# 在空集合上都 exit 0 —— 直接常驻跑要么永远红（其实只是还没写），要么悄悄绿
+# （等于没跑）。所以让它**在笔记变动时才跑**：第一篇文章进来，门禁自动生效。
+# 别的已有笔记的仓库没有这个过滤，每次都跑。
+#
+# 为什么不用 `npx tsx`：每次 CI 联网装包，断网时这一步就红 —— 而红的不是笔记。
+# Node 22.6+ 能原生执行 .ts，直接用 `node`。
+#
+# 为什么先数篇数：脚本在空集合上 exit 0，笔记树被删/改名就整片变绿 ⇒ 先断言至少一篇。
+name: Verify Agent Notes
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.agents/notes/**'
+      - '.agents/skills/**/scripts/**'
+      - '.github/workflows/verify-notes.yml'
+  pull_request:
+    paths:
+      - '.agents/notes/**'
+      - '.agents/skills/**/scripts/**'
+      - '.github/workflows/verify-notes.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Resolve scripts dir
+        run: |
+          set -euo pipefail
+          # 只按「目录存在」挑不够：实测有仓库的 notes-scripts 只含归档脚本，
+          # 选中它会在 verify-agent-note-tree.ts 上 MODULE_NOT_FOUND。
+          need="agent-note-tree.ts verify-agent-note-tree.ts verify-agent-note-format.ts verify-archived-agent-notes.ts"
+          complete() {
+            for f in $need; do [ -f "$1/$f" ] || return 1; done
+          }
+          picked=""
+          for dir in .agents/skills/*/scripts .agents/notes-scripts; do
+            [ -d "$dir" ] || continue
+            if complete "$dir"; then picked="$dir"; break; fi
+          done
+          if [ -z "$picked" ]; then
+            echo "找不到**完整**的门禁脚本目录（需要：$need）" >&2
+            exit 2
+          fi
+          echo "SCRIPTS=$picked" >> "$GITHUB_ENV"
+          echo "使用脚本目录：$picked"
+
+      - name: Assert the corpus is not empty
+        run: |
+          set -euo pipefail
+          count=$(find .agents/notes -name '*.md' | wc -l)
+          echo "笔记文件数：$count"
+          if [ "$count" -eq 0 ]; then
+            echo "笔记树里一篇都没有 —— 脚本在空集合上都会 exit 0，这道门禁就白跑了。" >&2
+            echo "先写第一篇；或者确认 .agents/notes 没有被误删。" >&2
+            exit 1
+          fi
+
+      - name: Pin archive baseline
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          echo "AGENT_NOTE_ARCHIVE_BASE_REF=refs/remotes/origin/main" >> "$GITHUB_ENV"
+
+      - name: Verify tree / format / archive seals
+        run: |
+          set -euo pipefail
+          node "$SCRIPTS/verify-agent-note-tree.ts"
+          node "$SCRIPTS/verify-agent-note-format.ts"
+          node "$SCRIPTS/verify-archived-agent-notes.ts"
