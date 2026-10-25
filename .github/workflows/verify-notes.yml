@@ -74,6 +74,34 @@ jobs:
             exit 1
           fi
 
+      - name: Notes coverage (changed code must bring a note)
+        run: |
+          set -euo pipefail
+          # 「改了受管路径却没带笔记」只有这道门禁能抓 —— tree/format/archived
+          # 只验**已有笔记的形状**，代码改了不写笔记它们一个字都不会说。
+          #
+          # base 的取法按事件类型：
+          #   PR      → base.sha（分叉点由 --since 用 merge-base 求）
+          #   push    → event.before（上一次推送的 tip）
+          #   其它/首推 → HEAD~1（没有上一提交可比时只查最后一个提交）
+          base=""
+          pr_base="${{ github.event.pull_request.base.sha }}"
+          before="${{ github.event.before }}"
+          if [ -n "$pr_base" ]; then
+            base="$pr_base"
+          elif [ -n "$before" ] && [ "$before" != "0000000000000000000000000000000000000000" ]; then
+            base="$before"
+          fi
+          if [ -z "$base" ]; then
+            base="HEAD~1"
+            echo "没有可用的 base（新分支或首次推送），退回 HEAD~1 —— 本次只检查最后一个提交。"
+          fi
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "base 提交 $base 不在本地历史里（浅克隆？）—— 本次无法检查，失败关闭。" >&2
+            exit 2
+          fi
+          node tools/notes-coverage.mjs --since "$base"
+
       - name: Pin archive baseline
         run: |
           set -euo pipefail
