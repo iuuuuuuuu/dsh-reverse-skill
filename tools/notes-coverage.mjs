@@ -229,6 +229,47 @@ const DEFAULT_EXEMPT_FILES = Object.freeze([
 const SKIP_MARKER = /^Note-Skip:\s*(\S.*)$/m;
 
 /**
+ * 「这个提交属于**已经记录过的那篇决策**」的标记。
+ *
+ * ## 为什么需要它（2026-10-25，Owner 指出「为了写笔记而写笔记」）
+ *
+ * 覆盖门禁要求**每个提交各自**带笔记（一个提交的笔记不能替另一个顶账）。
+ * 那条严格性本身是对的 —— 它防的是「一个提交带笔记、后面跟着三个不相干的改动」。
+ * 但代价是：**同一个决定拆成三次提交，就得写三篇笔记**。
+ * 实测那两个仓库里，功能/修复常被拆成「实现 → 补测试 → 修 CI」三次推，
+ * 于是要么写三篇近乎重复的笔记（注水），要么每次都写 `Note-Skip`（丢信息）。
+ *
+ * `Note-Ref:` 给第三条路：**声明这次提交属于已有那篇**。
+ * 与 `Note-Skip` 的区别是它指向具体一段论证，而且**要能被核对**
+ * （路径必须存在、必须在 .agents/notes 下）—— 不是一句"我觉得不用写"。
+ */
+const NOTE_REF_MARKER = /^Note-Ref:\s*(\S.*)$/m;
+
+/**
+ * 校验 `Note-Ref:` 指向的笔记。
+ *
+ * 失败方向一律是「不通过」：路径不存在、不在笔记树里、不是 .md，
+ * 都当作**没有**这个标记 —— 否则它就是比 Note-Skip 更廉价的后门。
+ *
+ * @param {string} value 标记里的路径（相对仓库根）。
+ * @returns {{ ok: boolean, path?: string, reason?: string }} 校验结果。
+ */
+function resolveNoteRef(value) {
+  const rel = String(value ?? '').trim().replace(/\\/g, '/');
+  if (rel === '') return { ok: false, reason: 'Note-Ref 为空' };
+  if (!rel.startsWith('.agents/notes/')) {
+    return { ok: false, reason: `Note-Ref 必须指向 .agents/notes/ 下的笔记（收到 ${rel}）` };
+  }
+  if (!rel.endsWith('.md')) return { ok: false, reason: `Note-Ref 必须指向 .md 笔记（收到 ${rel}）` };
+  try {
+    readFileSync(join(repoRoot, rel), 'utf8');
+  } catch {
+    return { ok: false, reason: `Note-Ref 指向的笔记不存在（${rel}）` };
+  }
+  return { ok: true, path: rel };
+}
+
+/**
  * git 输出的上限。
  *
  * `spawnSync` 默认 1MB，大仓库 `git ls-files` 会超。取值与
@@ -867,6 +908,19 @@ if (target.mode === 'range') {
       console.log(`  ✔ ${commit.sha.slice(0, 7)} 已用 Note-Skip 放行 —— ${ownSkip.trim()}`);
       continue;
     }
+
+    /* 或者声明「这次属于已有那篇」。校验失败要**说出来**并继续判红 ——
+       不能让一个写错的 Note-Ref 变成绿灯。 */
+    const body = git(['log', '-1', '--format=%B', commit.sha]).out;
+    const ownRef = NOTE_REF_MARKER.exec(body)?.[1];
+    if (typeof ownRef === 'string' && ownRef.trim() !== '') {
+      const resolved = resolveNoteRef(ownRef);
+      if (resolved.ok) {
+        console.log(`  ✔ ${commit.sha.slice(0, 7)} 关联既有笔记 ${resolved.path}（同一决定，不另立）`);
+        continue;
+      }
+      console.error(`  ✖ ${commit.sha.slice(0, 7)} Note-Ref 无效：${resolved.reason}`);
+    }
     failures.push({ sha: commit.sha, subject: commit.subject, managed: verdict.managed });
   }
 
@@ -890,8 +944,10 @@ if (target.mode === 'range') {
     for (const path of failure.managed) console.error(`      ${path}`);
     console.error('');
   }
-  console.error('补法：为每个提交补一篇笔记（可另起一个「补笔记」提交，');
-  console.error('      或把笔记 amend 进对应提交），或用 Note-Skip 说明为何不必。');
+  console.error('先判断这次该不该写 —— 写一篇凑数的笔记比不写更糟。三个出口：');
+  console.error('  ① 确属非平凡 ⇒ amend 一篇笔记进对应提交；');
+  console.error('  ② 同一个决定的后续提交 ⇒ Note-Ref: .agents/notes/<既有那篇>.md（不必再写一篇）；');
+  console.error('  ③ 机械改动 ⇒ Note-Skip: <理由>。');
   process.exit(1);
 }
 
@@ -913,6 +969,19 @@ if (verdict.ok) {
 /* 走到这里：有受管改动但没有笔记。看有没有显式放行。
    skipReason() 内部已只认「环境变量」与「本次提交信息」，不再回退到
    上一次提交 —— 那条回退曾导致写一次 Note-Skip 就永久开门。 */
+
+/* 先看 Note-Ref：声明「这次属于已有那篇」。与区间模式同一套校验，
+   失败时**说出来**并继续判红 —— 写错的 Note-Ref 不能变成绿灯。 */
+const refText = NOTE_REF_MARKER.exec(pendingCommitMessage() ?? '')?.[1];
+if (typeof refText === 'string' && refText.trim() !== '') {
+  const resolvedRef = resolveNoteRef(refText);
+  if (resolvedRef.ok) {
+    console.log(`笔记覆盖门禁通过（${label}）：关联既有笔记 ${resolvedRef.path}（同一决定，不另立）`);
+    process.exit(0);
+  }
+  console.error(`✖ Note-Ref 无效：${resolvedRef.reason}`);
+}
+
 const reasonText = skipReason();
 
 if (typeof reasonText === 'string' && reasonText.trim() !== '') {
