@@ -208,9 +208,12 @@ function executablePaths(upstreamRoot, vendored) {
 }
 
 /**
- * Apply the upstream executable bit to the working tree and, for paths already
- * tracked, to the index. A Windows checkout cannot record the bit on its own,
- * which would otherwise show up as a mode-only diff on every sync.
+ * Apply the upstream executable bit to the working tree and to the index.
+ *
+ * A Windows checkout cannot record the bit on its own, which would otherwise
+ * show up as a mode-only diff on every sync. New upstream files are not in the
+ * index yet, so they are added here as well; without `--add` their bit would be
+ * dropped and the pull request would commit them as 100644.
  */
 function applyExecutableModes(executable, previouslyExecutable) {
   const apply = (paths, mode, flag) => {
@@ -218,8 +221,8 @@ function applyExecutableModes(executable, previouslyExecutable) {
       if (!existsSync(join(PACKAGE_ROOT, key))) continue;
       try { chmodSync(join(PACKAGE_ROOT, key), mode); } catch { /* not representable */ }
       try {
-        execFileSync('git', ['update-index', '--chmod=' + flag, '--', key], { cwd: PACKAGE_ROOT, stdio: 'ignore' });
-      } catch { /* untracked or not a worktree */ }
+        execFileSync('git', ['update-index', '--add', '--chmod=' + flag, '--', key], { cwd: PACKAGE_ROOT, stdio: 'ignore' });
+      } catch { /* not a worktree */ }
     }
   };
   apply(executable, 0o755, '+x');

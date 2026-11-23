@@ -55,7 +55,7 @@ Status: implemented
 - **收益**：判据来自上游 git tree（事实），不来自工作副本（上次的结果）。
 - **代价与已知上限**：`.gitattributes` 现在有**两个来源**（上游段 + 本包追加段），
   标记线写坏了就会退化成整文件覆盖 —— 目前没有门禁校验这条标记线存在。
-- **代价与已知上限**：可执行位只在 `git ls-files -s` 能读到时才补得上；
+- **代价与已知上限**：可执行位上溯不了就补不上 —— 同步依赖上游的 `git ls-files -s`；
   上游若改成 submodule 或 tar 分发，这条路要重写。
 - **代价与已知上限**：`chmodSync` 在 Windows 上基本是空操作，FCB 的只读位不等于 unix 权限。
   也就是说**Windows 上验证不了这条修复**，只能靠 CI（Linux）确认。
@@ -66,3 +66,6 @@ Status: implemented
   与 `executablePaths()`；
 - 同步后 `.gitattributes` 的追加段仍在（本地可验）；
 - 可执行位在 Linux CI 上可验（Windows 本地验不了，见上文代价）。
+- 上游**新增**的可执行文件由 `git update-index --add --chmod=+x` 一并进索引，
+  否则 PR 会把它们提交成 `100644`，详见
+  [校验必须量将要提交的树](./2026-11-23-verify-must-check-the-committed-tree.md)。

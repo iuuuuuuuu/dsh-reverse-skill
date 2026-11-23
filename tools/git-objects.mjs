@@ -64,6 +64,36 @@ export function trackedEntries(cwd, revision = 'HEAD') {
   return entries;
 }
 
+/**
+ * SHA-256 of what git would store for each working-tree path, keyed by path.
+ *
+ * Paths go through the same clean filters `git add` applies, so line endings
+ * are normalised exactly as they would be on commit. That makes the digest
+ * independent of the platform and of what is currently staged — a mirrored
+ * file is untracked until the pull request is committed, and reading the index
+ * instead would compare a fresh manifest against stale blobs.
+ *
+ * `-w` is needed because reading the bytes back requires the object to exist.
+ * The loose objects it writes are unreachable and disappear with the next gc.
+ */
+export function workingTreeDigests(cwd, paths) {
+  const digests = new Map();
+  if (paths.length === 0) return digests;
+  const raw = execFileSync('git', ['hash-object', '-w', '--stdin-paths'], {
+    cwd,
+    input: paths.join(String.fromCharCode(10)) + String.fromCharCode(10),
+    encoding: 'utf8',
+    maxBuffer: MAX_BUFFER
+  });
+  const ids = raw.split(String.fromCharCode(10)).map((line) => line.trim()).filter((line) => line !== '');
+  if (ids.length !== paths.length) {
+    throw new Error('git hash-object returned ' + ids.length + ' object ids for ' + paths.length + ' paths');
+  }
+  const byId = digestObjects(cwd, ids);
+  for (let index = 0; index < paths.length; index += 1) digests.set(paths[index], byId.get(ids[index]));
+  return digests;
+}
+
 /** Map of path -> { mode, sha } for the current index. */
 export function indexedEntries(cwd) {
   const raw = execFileSync('git', ['ls-files', '-s', '-z'], { cwd, encoding: 'utf8', maxBuffer: MAX_BUFFER });
