@@ -4,11 +4,11 @@
  * Hard failures exit non-zero; advisory findings print as warnings.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { digestObjects, indexedEntries } from './git-objects.mjs';
+import { indexedEntries, isGitCheckout, workingTreeDigests } from './git-objects.mjs';
 
 const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SKILL_ROOTS = ['skills', 'CTF-Sandbox-Orchestrator'];
@@ -137,43 +137,75 @@ else {
   if (upstream.vendoredFiles !== Object.keys(manifest.files || {}).length) {
     fail('upstream.json vendoredFiles does not match tools/upstream-files.json');
   }
-  // The manifest records what upstream committed, so the tracked blobs must
-  // reproduce those digests exactly. Comparing stored objects rather than
-  // working-tree files keeps this meaningful on a checkout whose line endings
-  // were rewritten, and it catches a stale manifest as well as lost edits.
+  // The manifest records what upstream committed, so the working tree must
+  // reproduce those digests. Digests are taken through git's clean filters, so
+  // this stays meaningful on a checkout whose line endings were rewritten.
+  //
+  // Reading the index here instead used to look equivalent and was not: right
+  // after a sync the mirrored files are not staged, so every drifted file was
+  // compared against its previous committed blob and the nightly job failed on
+  // precisely the drift it exists to validate. The working tree is the thing
+  // the pull request will commit, so that is what gets checked.
   const recorded = manifest.files || {};
-  let index;
-  try {
-    index = indexedEntries(PACKAGE_ROOT);
-  } catch {
-    warn('could not read the git index; skipping vendored content check');
+  const keys = Object.keys(recorded).sort();
+  const present = [];
+  for (const key of keys) {
+    if (existsSync(join(PACKAGE_ROOT, key))) present.push(key);
+    else fail('vendored file is recorded but missing from the working tree: ' + key);
   }
-  if (index !== undefined) {
-    const specs = [];
-    for (const key of Object.keys(recorded).sort()) {
-      const entry = index.get(key);
-      if (entry === undefined) fail('vendored file is recorded but not tracked: ' + key);
-      else specs.push([key, entry.sha]);
-    }
+  if (isGitCheckout(PACKAGE_ROOT)) {
+    let digests;
     try {
-      const digests = digestObjects(PACKAGE_ROOT, specs.map(([, sha]) => sha));
-      const drifted = specs.filter(([key, sha]) => digests.get(sha) !== recorded[key]).map(([key]) => key);
+      digests = workingTreeDigests(PACKAGE_ROOT, present);
+    } catch (error) {
+      fail('could not hash the vendored tree: ' + error.message);
+    }
+    if (digests !== undefined) {
+      const drifted = present.filter((key) => digests.get(key) !== recorded[key]);
       if (drifted.length > 0) {
         fail('vendored content does not match tools/upstream-files.json: ' + drifted.slice(0, 10).join(', '));
       }
-    } catch (error) {
-      warn('could not read tracked blobs; skipping vendored content check: ' + error.message);
     }
+  } else {
+    warn('not a git checkout; skipping vendored content check');
   }
 
   // Git records an executable bit in the tree that some filesystems cannot
-  // represent, so a Windows checkout silently loses it. Compare the index
-  // against the manifest to catch a mode-only drift the content digests miss.
+  // represent, so a Windows checkout silently loses it. Where the bit is
+  // observable it is checked on the thing a commit would record: the index for
+  // a tracked file, the filesystem for an untracked one on a platform that can
+  // represent it. On Windows an untracked file has no observable bit at all, so
+  // that case is reported rather than guessed at.
   const executable = manifest.executable || [];
-  if (executable.length > 0 && index !== undefined) {
-    const missing = executable.filter((key) => index.has(key) && index.get(key).mode !== '100755');
-    if (missing.length > 0) {
-      fail('vendored files should be executable but are recorded as 100644: ' + missing.slice(0, 10).join(', '));
+  if (executable.length > 0) {
+    let index;
+    try {
+      index = indexedEntries(PACKAGE_ROOT);
+    } catch {
+      warn('could not read the git index; skipping executable-bit check');
+    }
+    const unobservable = [];
+    const demoted = [];
+    for (const key of executable) {
+      if (!existsSync(join(PACKAGE_ROOT, key))) continue;
+      const entry = index === undefined ? undefined : index.get(key);
+      if (entry !== undefined) {
+        if (entry.mode !== '100755') demoted.push(key);
+      } else if (process.platform === 'win32') {
+        unobservable.push(key);
+      } else {
+        try {
+          if ((statSync(join(PACKAGE_ROOT, key)).mode & 0o111) === 0) demoted.push(key);
+        } catch {
+          demoted.push(key);
+        }
+      }
+    }
+    if (demoted.length > 0) {
+      fail('vendored files should be executable but are recorded without the bit: ' + demoted.slice(0, 10).join(', '));
+    }
+    if (unobservable.length > 0) {
+      warn('cannot observe the executable bit of untracked files on Windows: ' + unobservable.slice(0, 10).join(', '));
     }
   }
 }
