@@ -1,11 +1,11 @@
 {
   "repository": "https://github.com/zhaoxuya520/reverse-skill.git",
   "branch": "main",
-  "commit": "cab634bd855fc287f6e420c1f36fd1a6b9245960",
-  "commitDate": "2026-09-22T05:18:45Z",
+  "commit": "b972ad0e90f26d8f044828f004da22a4a585da12",
+  "commitDate": "2026-11-14T21:59:54+08:00",
   "upstreamVersion": "1.0.1",
-  "syncedAt": "2026-10-04T07:42:45.622Z",
-  "vendoredFiles": 592,
+  "syncedAt": "2026-11-23T13:51:13.340Z",
+  "vendoredFiles": 618,
   "excluded": [
     ".git",
     ".github",
